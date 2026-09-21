@@ -17,3 +17,16 @@ Demonstration of an agent using the tool to generate a shareable report link dir
 MCP Server development (Node.js/NestJS or Python)
 Cumulocity REST APIs
 HTML/Markdown reporting
+
+## Architectural Layout
+
+```mermaid
+flowchart LR
+    D[Device Fault] --> AAM[AI Agent Manager<br/>c8y]
+    AAM -->|MCP call| MCP[Go MCP Server]
+    MCP -->|fan-out| C8Y[(Cumulocity APIs<br/>alarms/measurements/events)]
+    C8Y --> MCP
+    MCP -->|correlate + render| Report[Diagnostic Briefing]
+    Report -->|publish| Hosting[App Hosting]
+    Hosting -->|link| AAM
+```
