@@ -140,3 +140,41 @@ export async function fetchDeviceType(
   )
   return body?.type
 }
+
+/**
+ * Resolve a Cumulocity managed-object id from an external id (e.g. a serial like
+ * "sim-node-01" bound under the "c8y_Serial" external-id type). Returns
+ * undefined if the external id is not found.
+ */
+export async function resolveDeviceIdByExternalId(
+  fetch: C8yFetcher,
+  externalId: string,
+  externalIdType = 'c8y_Serial',
+): Promise<string | undefined> {
+  const path =
+    `/identity/externalIds/${encodeURIComponent(externalIdType)}/` +
+    encodeURIComponent(externalId)
+  try {
+    const body = await fetch(path)
+    return body?.managedObject?.id
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * List device ids of a given type from the inventory (for fleet checks). Returns
+ * up to `pageSize` managed-object ids.
+ */
+export async function listDeviceIdsByType(
+  fetch: C8yFetcher,
+  type: string,
+  pageSize = 100,
+): Promise<string[]> {
+  const path =
+    `/inventory/managedObjects?query=${encodeURIComponent(`type eq '${type}'`)}` +
+    `&pageSize=${pageSize}`
+  const body = await fetch(path)
+  const items: any[] = body.managedObjects ?? []
+  return items.map((m) => String(m.id))
+}

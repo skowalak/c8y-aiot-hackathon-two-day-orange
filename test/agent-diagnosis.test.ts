@@ -1,11 +1,13 @@
 // Tests the full diagnostic agent loop (record -> analyze -> re-sample ->
 // conclude -> clear) end to end, with injected dependencies:
 //   - a simulated Cumulocity fetcher serving faulty water-pump telemetry
-//   - a deterministic stub reasoner standing in for Claude
+//   - the GENERIC, knowledge-driven reasoner (no device facts in code; it reads
+//     the ranges from c8y_Water_Pump.md)
 //
-// The key assertion: given a pump whose flow is stuck at 0 while pressure is
-// normal, the agent must conclude the device is FAULTY and locate the cause in
-// the MEASUREMENT domain — reproduced across both sampling passes.
+// The key assertion: given a pump whose flow is stuck at 0 (below the 20 l/min
+// the knowledge base expects) while pressure is normal, the agent concludes the
+// device is FAULTY and locates the cause in the MEASUREMENT domain — reproduced
+// across both sampling passes.
 
 import { describe, it, expect } from 'vitest'
 
@@ -15,7 +17,7 @@ import {
   FAULTY_PUMP_DEVICE_ID,
   makePumpFetcher,
 } from './fixtures/water-pump'
-import { stubReasoner } from './fixtures/stub-reasoner'
+import { genericReasoner } from './fixtures/generic-reasoner'
 
 describe('diagnostic agent — faulty water pump', () => {
   it('identifies a measurement-domain fault (flow zero, pressure normal)', async () => {
@@ -24,13 +26,17 @@ describe('diagnostic agent — faulty water pump', () => {
       deviceId: FAULTY_PUMP_DEVICE_ID,
       pass2WaitSeconds: 0, // no real wait in tests
       fetch: makePumpFetcher({ faulty: true }),
-      reasoner: stubReasoner,
+      reasoner: genericReasoner,
     })
 
     expect(verdict.faulty).toBe(true)
     expect(verdict.faultDomain).toBe('measurement')
     expect(verdict.deviceType).toBe('c8y_Water_Pump')
-    expect(verdict.rootCause.toLowerCase()).toContain('flow')
+    // Evidence (derived from the knowledge base, not hard-coded) must cite the
+    // out-of-range flow series.
+    expect(
+      verdict.evidence.some((e) => e.signal.toLowerCase().includes('flow')),
+    ).toBe(true)
     expect(verdict.confidence).toBeGreaterThan(0.5)
 
     // Evidence must cite the reproduced flow violation across both passes.
@@ -53,7 +59,7 @@ describe('diagnostic agent — faulty water pump', () => {
       deviceId: FAULTY_PUMP_DEVICE_ID,
       pass2WaitSeconds: 0,
       fetch: makePumpFetcher({ faulty: true }),
-      reasoner: stubReasoner,
+      reasoner: genericReasoner,
     })
     expect(getSession(sessionId)).toBeUndefined()
   })
@@ -64,7 +70,7 @@ describe('diagnostic agent — faulty water pump', () => {
       deviceId: FAULTY_PUMP_DEVICE_ID,
       pass2WaitSeconds: 0,
       fetch: makePumpFetcher({ faulty: false }),
-      reasoner: stubReasoner,
+      reasoner: genericReasoner,
     })
 
     expect(verdict.faulty).toBe(false)

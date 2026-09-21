@@ -15,16 +15,44 @@ device is faulty and in which domain (**measurement / alarm / event**):
 4. **Conclude** — Claude produces a structured verdict.
 5. **Clear** — the in-memory telemetry is wiped (always, even on error).
 
+## Fleet check — find the faulty device among many
+
+`POST /service/diagnostic-agent/fleet-check` diagnoses several devices, ranks them
+and names the single device not working properly. Select the devices by one of:
+
+```jsonc
+// explicit managed-object ids:
+{ "deviceIds": ["1234", "1235", ...], "pass2WaitSeconds": 0 }
+// serials resolved via external id:
+{ "serials": ["sim-node-01", "sim-node-02", ...] }
+// or discover a whole device type:
+{ "discoverType": "sim_PowerNode" }
+```
+
+Response: `{ checked, ranking: [worst-first], culprit, summary }`. Each device is
+diagnosed against **its knowledge-base file only** — no device rules live in the
+agent or MCP code.
+
+## Domain knowledge lives ONLY in the knowledge base
+
+The expected-behaviour of each device class is written in `src/knowledge/*.md`
+(e.g. `sim_PowerNode.md` from `TICKET.md`). Neither the agent, the MCP server, nor
+the tests hard-code thresholds — Claude (or, in tests, a generic
+knowledge-driven reasoner) reads the recorded data + the Markdown and derives the
+verdict. Change the `.md` and the diagnosis changes.
+
 ## Layout
 
 ```
 nitro.config.ts            # c8y-nitro module + manifest (contextPath, roles)
+Dockerfile                 # standalone multi-stage image (see below)
 src/
   routes/
-    diagnose.post.ts        # POST /service/diagnostic-agent/diagnose
+    diagnose.post.ts        # POST /service/diagnostic-agent/diagnose (one device)
+    fleet-check.post.ts     # POST /service/diagnostic-agent/fleet-check (many)
     mcp/[...].ts            # MCP (Streamable HTTP / SSE) transport
     health.get.ts
-  agent/                    # loop.ts, prompts.ts, verdict.ts (Claude)
+  agent/                    # loop.ts, fleet-check.ts, prompts.ts, verdict.ts
   mcp/
     server.ts               # MCP server wiring
     tools/                  # record-window, query-local, get-expectations, clear-session
@@ -61,18 +89,26 @@ npm test
 ```
 
 No credentials required — the tests inject a simulated Cumulocity fetcher and a
-deterministic stub reasoner. Coverage:
+**generic, knowledge-driven reasoner** (it parses ranges out of the knowledge
+Markdown; it holds no device facts). Coverage:
 
 - `test/mcp-server.test.ts` — connects an MCP client to the diagnostic server over
   the SDK's in-memory transport; exercises `record_window`, `query_local`,
   `get_expectations`, `clear_session`.
 - `test/agent-diagnosis.test.ts` — drives the full agent loop against a simulated
-  **failing water pump** (flow stuck at 0, pressure normal) and asserts the
-  verdict is `faulty: true`, `faultDomain: "measurement"`, with the flow violation
-  reproduced across both passes. Includes a healthy control and cleanup-on-error.
-- `test/fixtures/` — the raw-c8y-shaped pump telemetry and the stub reasoner.
+  **failing water pump** (flow stuck at 0, below the 20 l/min the knowledge base
+  expects) and asserts `faulty: true`, `faultDomain: "measurement"`, flow
+  violation reproduced across both passes. Healthy control + cleanup-on-error.
+- `test/fleet-check.test.ts` — **6 Power Nodes** (`TICKET.md` envelope); asserts the
+  orchestrator flags exactly one culprit (`sim-node-01`), ranks it first, and
+  locates the fault in the **event** domain (unplanned restarts) — derived only
+  from data + `sim_PowerNode.md`.
+- `test/fixtures/` — raw-c8y-shaped telemetry (`water-pump.ts`, `power-node.ts`)
+  and the generic reasoner (`generic-reasoner.ts`).
 
 ## Try it
+
+Single device:
 
 ```sh
 curl -X POST http://localhost:3000/diagnose \
@@ -80,16 +116,40 @@ curl -X POST http://localhost:3000/diagnose \
   -d '{ "deviceId": "12345", "pass2WaitSeconds": 0 }'
 ```
 
+Fleet (find the faulty Power Node among the simulator's 6 devices, live):
+
+```sh
+curl -X POST http://localhost:3000/fleet-check \
+  -H 'content-type: application/json' \
+  -d '{ "discoverType": "sim_PowerNode", "pass2WaitSeconds": 0 }'
+```
+
 Set `pass2WaitSeconds: 0` for a fast demo (skips the wait between passes).
 
 ## Build & package
 
+Two options.
+
+**c8y-nitro native** (produces the deployable zip + cumulocity.json; needs Docker
+on the build host):
+
 ```sh
-pnpm build     # produces Docker image, cumulocity.json, deployable zip (c8y-nitro)
+npm run build
 ```
 
 Upload the zip in Cumulocity Application Management and subscribe. The MCP
 endpoint is then reachable at `/service/diagnostic-agent/mcp`.
+
+**Standalone Dockerfile** (build the container directly):
+
+```sh
+docker build -t c8y-diagnostic-agent .
+docker run --rm -p 8080:80 --env-file .env c8y-diagnostic-agent
+```
+
+The image builds the Nitro `.output/` and runs it on port 80. Secrets
+(`ANTHROPIC_API_KEY`, and in dev the `C8Y_*` vars) are supplied at run time via
+`--env-file` / the platform — never baked into the image.
 
 ## Known follow-ups
 

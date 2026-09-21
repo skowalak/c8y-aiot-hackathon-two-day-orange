@@ -1,0 +1,22 @@
+node_modules
+.output
+.nitro
+.data
+dist
+*.zip
+
+# secrets — never send to the build context
+.env
+.env.local
+
+# vcs / tooling / other stacks
+.git
+.gitignore
+simulator
+docs
+test
+*.md
+result
+result-*
+.claude-token
+.DS_Store
