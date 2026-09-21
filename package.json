@@ -1,0 +1,27 @@
+{
+  "name": "c8y-diagnostic-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Diagnostic Agent & Diagnostic MCP Server for Cumulocity IoT (Nitro microservice)",
+  "author": "c8y-aiot-hackathon",
+  "scripts": {
+    "dev": "nitro dev",
+    "build": "nitro build",
+    "preview": "node .output/server/index.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "c8y-nitro": "^0.10.1",
+    "nitro": "latest",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^5.0.1"
+  }
+}

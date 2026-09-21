@@ -1,5 +1,22 @@
+node_modules/
+.output/
+.nitro/
+.data/
+dist/
+*.zip
+
+# secrets
+.env
+.env.example
+.env.local
+
+# simulator / tooling (from upstream)
 result
 result-*
 .claude-token
 simulator/devices.csv
 .envrc
+
+# editor / os
+.DS_Store
+*.log

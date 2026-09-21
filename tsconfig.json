@@ -1,0 +1,4 @@
+{
+  "extends": "nitro/tsconfig",
+  "include": ["**/*", "node_modules/.c8y-nitro/*.d.ts"]
+}
