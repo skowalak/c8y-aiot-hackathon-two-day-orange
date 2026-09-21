@@ -2,3 +2,4 @@ result
 result-*
 .claude-token
 simulator/devices.csv
+.envrc
