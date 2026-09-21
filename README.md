@@ -169,6 +169,15 @@ team.
    also runs on unaffected assets, and the recommendations follow the scope —
    inspect the supply rather than swap the node.
 
+The ratio in step 4 counts only the neighbours that actually report the series
+in question. Real asset groups are mixed, and a door sensor that has no opinion
+on voltage is not evidence that the voltage is fine: counting it as unaffected
+would dilute a genuine feeder-wide fault below the threshold and send someone to
+replace a healthy node. Assets that cannot speak to the series are reported
+separately and excluded from the ratio, and if *none* of the neighbours carries
+it, the verdict says so and drops to low confidence rather than claiming the
+fault is isolated.
+
 ### The briefing
 
 The report is a standalone HTML document: inline SVG charts per series with the

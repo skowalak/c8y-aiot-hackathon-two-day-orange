@@ -57,13 +57,17 @@ type VerdictOutput struct {
 
 // CorrelationOutput summarises the neighbour comparison.
 type CorrelationOutput struct {
-	Series            string   `json:"series"`
-	Direction         string   `json:"direction"`
-	AffectedNeighbors int      `json:"affectedNeighbors"`
-	TotalNeighbors    int      `json:"totalNeighbors"`
-	MaxOnsetSkewS     float64  `json:"maxOnsetSkewSeconds"`
-	AffectedNames     []string `json:"affectedNames,omitempty"`
-	UnaffectedNames   []string `json:"unaffectedNames,omitempty"`
+	Series            string `json:"series"`
+	Direction         string `json:"direction"`
+	AffectedNeighbors int    `json:"affectedNeighbors"`
+	// ComparableNeighbors counts those reporting the series; the verdict ratio
+	// is Affected/Comparable, not Affected/Total.
+	ComparableNeighbors int      `json:"comparableNeighbors"`
+	TotalNeighbors      int      `json:"totalNeighbors"`
+	MaxOnsetSkewS       float64  `json:"maxOnsetSkewSeconds"`
+	AffectedNames       []string `json:"affectedNames,omitempty"`
+	UnaffectedNames     []string `json:"unaffectedNames,omitempty"`
+	NotComparableNames  []string `json:"notComparableNames,omitempty"`
 }
 
 // AnalyzeOutput is the structured result of analyze_device_failure_2.
@@ -222,14 +226,17 @@ func correlationOutput(b *diag.Briefing) *CorrelationOutput {
 	}
 	out := &CorrelationOutput{
 		Series: c.Series, Direction: c.Direction,
-		AffectedNeighbors: c.Affected, TotalNeighbors: c.Total,
-		MaxOnsetSkewS: c.MaxOnsetSkew,
+		AffectedNeighbors: c.Affected, ComparableNeighbors: c.Comparable,
+		TotalNeighbors: c.Total, MaxOnsetSkewS: c.MaxOnsetSkew,
 	}
 	for _, n := range c.Neighbors {
-		if n.Correlated {
+		switch {
+		case n.Correlated:
 			out.AffectedNames = append(out.AffectedNames, n.Name)
-		} else {
+		case n.Comparable:
 			out.UnaffectedNames = append(out.UnaffectedNames, n.Name)
+		default:
+			out.NotComparableNames = append(out.NotComparableNames, n.Name)
 		}
 	}
 	return out

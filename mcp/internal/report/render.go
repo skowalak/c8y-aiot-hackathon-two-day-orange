@@ -172,13 +172,19 @@ func Markdown(b *diag.Briefing) string {
 		p("")
 		p("### Neighbour correlation on `%s` (%s)", c.Series, c.Direction)
 		p("")
-		p("%d of %d neighbouring assets correlate, max onset skew %.0fs.", c.Affected, c.Total, c.MaxOnsetSkew)
+		p("%d of %d comparable neighbouring assets correlate, max onset skew %.0fs.",
+			c.Affected, c.Comparable, c.MaxOnsetSkew)
+		if skipped := c.Total - c.Comparable; skipped > 0 {
+			p("")
+			p("%d of the %d neighbours do not report `%s` and are excluded from the ratio.",
+				skipped, c.Total, c.Series)
+		}
 		p("")
-		p("| Asset | Correlated | Onset skew | Extreme | Baseline | Group | Note |")
-		p("| --- | --- | --- | --- | --- | --- | --- |")
+		p("| Asset | Comparable | Correlated | Onset skew | Extreme | Baseline | Group | Note |")
+		p("| --- | --- | --- | --- | --- | --- | --- | --- |")
 		for _, n := range c.Neighbors {
-			p("| %s | %s | %+.0fs | %.2f | %.2f | %s | %s |",
-				n.Name, yesNo(n.Correlated), n.OnsetSkewS, n.Value, n.Baseline, n.SharedGroup, n.Note)
+			p("| %s | %s | %s | %+.0fs | %.2f | %.2f | %s | %s |",
+				n.Name, yesNo(n.Comparable), yesNo(n.Correlated), n.OnsetSkewS, n.Value, n.Baseline, n.SharedGroup, n.Note)
 		}
 	}
 
@@ -314,6 +320,7 @@ var htmlTemplate = template.Must(template.New("briefing").Funcs(template.FuncMap
 	"windowEvents": windowEvents,
 	"lower":        strings.ToLower,
 	"join":         strings.Join,
+	"sub":          func(a, b int) int { return a - b },
 }).Parse(htmlSource))
 
 const htmlSource = `<!DOCTYPE html>
@@ -432,11 +439,12 @@ const htmlSource = `<!DOCTYPE html>
  {{ with .B.Correlation }}
  <div class="card">
   <h3>Neighbour correlation – <code>{{ .Series }}</code> {{ .Direction }}</h3>
-  <p>{{ .Affected }} of {{ .Total }} neighbouring assets show the same behaviour, max onset skew {{ printf "%.0f" .MaxOnsetSkew }} s.</p>
+  <p>{{ .Affected }} of {{ .Comparable }} comparable neighbouring assets show the same behaviour, max onset skew {{ printf "%.0f" .MaxOnsetSkew }} s.
+   {{ if gt .Total .Comparable }}{{ sub .Total .Comparable }} of the {{ .Total }} neighbours do not report <code>{{ .Series }}</code> and are excluded from the ratio.{{ end }}</p>
   <table>
-   <tr><th>Asset</th><th>Correlated</th><th>Onset skew</th><th>Extreme</th><th>Baseline</th><th>Shared group</th><th>Note</th></tr>
+   <tr><th>Asset</th><th>Comparable</th><th>Correlated</th><th>Onset skew</th><th>Extreme</th><th>Baseline</th><th>Shared group</th><th>Note</th></tr>
    {{ range .Neighbors }}
-   <tr><td>{{ .Name }}</td><td>{{ yesNo .Correlated }}</td>
+   <tr><td>{{ .Name }}</td><td>{{ yesNo .Comparable }}</td><td>{{ yesNo .Correlated }}</td>
        <td>{{ if .Correlated }}{{ printf "%+.0f s" .OnsetSkewS }}{{ else }}–{{ end }}</td>
        <td>{{ printf "%.2f" .Value }}</td><td>{{ printf "%.2f" .Baseline }}</td>
        <td>{{ .SharedGroup }}</td><td>{{ .Note }}</td></tr>

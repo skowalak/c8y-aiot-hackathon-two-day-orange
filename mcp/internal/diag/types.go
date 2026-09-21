@@ -133,8 +133,12 @@ func (d *DeviceReport) Anomalous() bool { return len(d.Anomalies) > 0 }
 
 // NeighborCorrelation is the comparison of one neighbour with the target.
 type NeighborCorrelation struct {
-	Device      string  `json:"device"`
-	Name        string  `json:"name"`
+	Device string `json:"device"`
+	Name   string `json:"name"`
+	// Comparable reports whether this neighbour carries the leading series at
+	// all. One that does not is no evidence either way and is excluded from the
+	// correlation ratio.
+	Comparable  bool    `json:"comparable"`
 	Correlated  bool    `json:"correlated"`
 	OnsetSkewS  float64 `json:"onsetSkewSeconds,omitempty"`
 	Value       float64 `json:"value,omitempty"`
@@ -146,9 +150,14 @@ type NeighborCorrelation struct {
 
 // Correlation is the cross asset picture for the leading anomaly.
 type Correlation struct {
-	Series       string                `json:"series"`
-	Direction    string                `json:"direction"`
-	Affected     int                   `json:"affectedNeighbors"`
+	Series    string `json:"series"`
+	Direction string `json:"direction"`
+	Affected  int    `json:"affectedNeighbors"`
+	// Comparable counts the neighbours that report the leading series and so
+	// could have confirmed or refuted a shared cause. The verdict ratio uses
+	// this, not Total: a group mixing device types would otherwise dilute a
+	// real shared-infrastructure fault into a device-local verdict.
+	Comparable   int                   `json:"comparableNeighbors"`
 	Total        int                   `json:"totalNeighbors"`
 	MaxOnsetSkew float64               `json:"maxOnsetSkewSeconds"`
 	Neighbors    []NeighborCorrelation `json:"neighbors,omitempty"`

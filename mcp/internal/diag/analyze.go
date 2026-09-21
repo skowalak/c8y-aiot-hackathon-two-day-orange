@@ -297,13 +297,17 @@ func correlate(target *DeviceReport, neighbors []DeviceReport) *Correlation {
 			nc.Note = "no data: " + n.Error
 		case match == nil:
 			if s, ok := n.Stats[lead.Series]; ok {
+				nc.Comparable = true
+				c.Comparable++
 				nc.Baseline = s.Baseline
 				nc.Value = extremeFor(s, lead.Direction)
 				nc.Note = "series present, no anomaly detected"
 			} else {
-				nc.Note = "does not report " + lead.Series
+				nc.Note = "does not report " + lead.Series + ", not comparable"
 			}
 		default:
+			nc.Comparable = true
+			c.Comparable++
 			skew := match.Onset.Sub(lead.Onset).Seconds()
 			nc.OnsetSkewS = round(skew, 1)
 			nc.Value = match.Value
@@ -368,11 +372,19 @@ func verdict(b *Briefing) Verdict {
 	group := primaryGroup(b)
 	restarts := countEvents(&b.Target, "restart", "reboot", "reset")
 
-	if c != nil && c.Total > 0 && c.Affected > 0 && c.Affected*2 >= c.Total {
+	// Only neighbours that report the leading series are evidence. Counting the
+	// rest would let an unrelated door sensor in the same group vote against a
+	// feeder-wide fault.
+	var comparable int
+	if c != nil {
+		comparable = c.Comparable
+	}
+
+	if c != nil && comparable > 0 && c.Affected > 0 && c.Affected*2 >= comparable {
 		v := Verdict{
 			Scope: "shared-infrastructure",
-			Headline: fmt.Sprintf("Shared upstream fault in %s: %d of %d neighbouring assets show the same %s %s within %.0fs",
-				group, c.Affected, c.Total, c.Series, c.Direction, c.MaxOnsetSkew),
+			Headline: fmt.Sprintf("Shared upstream fault in %s: %d of %d comparable neighbouring assets show the same %s %s within %.0fs",
+				group, c.Affected, comparable, c.Series, c.Direction, c.MaxOnsetSkew),
 			Confidence: "medium",
 		}
 		if c.Affected >= 2 && c.MaxOnsetSkew <= 90 {
@@ -380,11 +392,16 @@ func verdict(b *Briefing) Verdict {
 		}
 		v.Reasoning = append(v.Reasoning,
 			fmt.Sprintf("%s on %s: %s", strings.ToLower(lead.Kind), deviceLabel(&b.Target), lead.Description),
-			fmt.Sprintf("the same %s occurs on %d of %d assets in %s with at most %.0fs onset skew, which no device-local defect can produce",
-				c.Direction, c.Affected, c.Total, group, c.MaxOnsetSkew))
-		if unaffected := c.Total - c.Affected; unaffected > 0 {
+			fmt.Sprintf("the same %s occurs on %d of %d assets reporting %s in %s with at most %.0fs onset skew, which no device-local defect can produce",
+				c.Direction, c.Affected, comparable, c.Series, group, c.MaxOnsetSkew))
+		if unaffected := comparable - c.Affected; unaffected > 0 {
 			v.Reasoning = append(v.Reasoning,
-				fmt.Sprintf("%d asset(s) stay nominal, so the disturbance is bounded to a part of the topology, not the whole tenant", unaffected))
+				fmt.Sprintf("%d comparable asset(s) stay nominal, so the disturbance is bounded to a part of the topology, not the whole tenant", unaffected))
+		}
+		if skipped := c.Total - comparable; skipped > 0 {
+			v.Reasoning = append(v.Reasoning,
+				fmt.Sprintf("%d further neighbour(s) do not report %s and were excluded from the ratio rather than counted as unaffected",
+					skipped, c.Series))
 		}
 		if restarts > 0 {
 			v.Reasoning = append(v.Reasoning,
@@ -405,11 +422,19 @@ func verdict(b *Briefing) Verdict {
 			fmt.Sprintf("%s on %s: %s", strings.ToLower(lead.Kind), deviceLabel(&b.Target), lead.Description),
 		},
 	}
-	if c != nil && c.Total > 0 {
+	switch {
+	case c != nil && comparable > 0:
 		v.Reasoning = append(v.Reasoning,
-			fmt.Sprintf("none of the %d neighbouring assets in %s shows a comparable %s in the same window",
+			fmt.Sprintf("none of the %d neighbouring assets in %s that report %s shows the same behaviour in the same window",
+				comparable, group, c.Series))
+	case c != nil && c.Total > 0:
+		// Neighbours exist but none carries the series, so they cannot refute a
+		// shared cause and the verdict must not pretend otherwise.
+		v.Confidence = "low"
+		v.Reasoning = append(v.Reasoning,
+			fmt.Sprintf("none of the %d neighbouring assets in %s reports %s, so a shared cause could neither be confirmed nor excluded",
 				c.Total, group, c.Series))
-	} else {
+	default:
 		v.Confidence = "low"
 		v.Reasoning = append(v.Reasoning, "no neighbouring assets available, so a shared cause could not be excluded")
 	}
