@@ -40,11 +40,11 @@ func TestToolContract(t *testing.T) {
 		t.Fatalf("list tools: %v", err)
 	}
 	if len(res.Tools) != 1 {
-		t.Fatalf("got %d tools, want exactly analyze_device_failure", len(res.Tools))
+		t.Fatalf("got %d tools, want exactly analyze_device_failure_2", len(res.Tools))
 	}
 	tool := res.Tools[0]
 
-	if tool.Name != "analyze_device_failure" {
+	if tool.Name != "analyze_device_failure_2" {
 		t.Errorf("name = %q", tool.Name)
 	}
 	if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {

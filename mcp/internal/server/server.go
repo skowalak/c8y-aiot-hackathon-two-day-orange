@@ -34,7 +34,7 @@ type Options struct {
 	PathPrefix string
 }
 
-// AnalyzeInput is the argument set of analyze_device_failure.
+// AnalyzeInput is the argument set of analyze_device_failure_2.
 type AnalyzeInput struct {
 	Device           string `json:"device" jsonschema:"device to diagnose: Cumulocity managed object ID, serial/external ID or exact device name"`
 	FaultTime        string `json:"faultTime,omitempty" jsonschema:"timestamp of the reported fault in RFC3339 (e.g. 2026-09-21T14:05:15Z); defaults to now"`
@@ -66,7 +66,7 @@ type CorrelationOutput struct {
 	UnaffectedNames   []string `json:"unaffectedNames,omitempty"`
 }
 
-// AnalyzeOutput is the structured result of analyze_device_failure.
+// AnalyzeOutput is the structured result of analyze_device_failure_2.
 type AnalyzeOutput struct {
 	Device          string             `json:"device"`
 	DeviceID        string             `json:"deviceId"`
@@ -93,7 +93,7 @@ func New(opt Options) *mcp.Server {
 	}, nil)
 
 	mcp.AddTool(s, &mcp.Tool{
-		Name:  "analyze_device_failure",
+		Name:  "analyze_device_failure_2",
 		Title: "Analyse a device failure",
 		Description: strings.TrimSpace(`
 Diagnose a reported device fault in Cumulocity IoT.

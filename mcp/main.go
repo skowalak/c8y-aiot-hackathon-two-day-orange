@@ -1,5 +1,5 @@
 // Command mcpd is the Automated Root Cause & Diagnostics MCP server for
-// Cumulocity IoT. It exposes analyze_device_failure over SSE to the AI Agent
+// Cumulocity IoT. It exposes analyze_device_failure_2 over SSE to the AI Agent
 // Manager and hosts the generated diagnostic briefings.
 package main
 

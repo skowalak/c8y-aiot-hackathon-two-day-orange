@@ -8,7 +8,7 @@ Troubleshoot intermittent device issues, root cause analysis requires combining 
 
 ### Expected Outcome
 
-An MCP server microservice running via SSE that exposes an analyze_device_failure tool to the AI Agent Manager.
+An MCP server microservice running via SSE that exposes an analyze_device_failure_2 tool to the AI Agent Manager.
 Automated artifact generation containing diagnostic charts, evidence summaries, and recommended field technician steps.
 Demonstration of an agent using the tool to generate a shareable report link directly within chat.
 
@@ -123,7 +123,7 @@ neighbours — not the firmware change — is the only consistent root cause.
 ## MCP Server
 
 `mcp/` is the diagnostic server. It exposes a single tool,
-`analyze_device_failure`, over SSE, and it never writes to the tenant apart from
+`analyze_device_failure_2`, over SSE, and it never writes to the tenant apart from
 storing the briefing it produces.
 
 ```
@@ -141,7 +141,7 @@ query the smart rule service for thresholds), `-v`.
 
 ### The tool
 
-`analyze_device_failure` takes `device` (managed object ID, `c8y_Serial`, or
+`analyze_device_failure_2` takes `device` (managed object ID, `c8y_Serial`, or
 name) and optionally `faultTime`, `symptom`, `beforeMinutes`, `afterMinutes`,
 `includeNeighbors`, `maxNeighbors`, `lookbackDays`. It returns a structured
 verdict for the agent plus a link to a rendered HTML briefing for the field
@@ -239,5 +239,26 @@ The registration itself is a small document: `name`, `description`, the public
 `/sse` URL, `type: sse` and `sendAuthentication: true`. The last flag makes the
 agent forward the calling user's credentials, so the diagnosis runs with that
 user's permissions rather than the service user's. Once stored, the tool shows
-up in the agent builder alongside the built-in `cumulocity-default` tools and
-can be attached to an agent.
+up in the agent builder alongside the built-in `cumulocity-default` tools.
+
+Registering the server only makes the tool *available*; it does not attach it to
+anything. Each agent carries its own `mcp` array naming the servers and tools it
+may use, so the last step is wiring one up:
+
+```sh
+curl -u "$C8Y_TENANT/$C8Y_USER:$C8Y_PASSWORD" -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"device-diagnostics-2","type":"text","availability":"SHARED",
+       "mcp":[{"serverName":"diagnostic-agent",
+               "tools":["analyze_device_failure_2"]}],
+       "agent":{"system":"You are a field-service diagnostics assistant ..."}}' \
+  "$C8Y_BASEURL/service/ai/agent/text"
+```
+
+A `text` agent is the right shape here: an `object` agent forces every answer
+through a fixed JSON schema, which buys nothing when the useful output is prose
+plus a link. The system prompt does the real work — it has to insist the tool is
+called before any answer is given, explain how to resolve vague reports
+("this morning") into an RFC3339 `faultTime`, and require that the briefing link
+is passed through verbatim. Note that `temperature` is rejected outright by the
+configured model, despite being documented in the agent schema.
