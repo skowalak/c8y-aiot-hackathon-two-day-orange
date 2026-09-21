@@ -1,0 +1,46 @@
+{
+  "apiVersion": "2",
+  "name": "diagnostic-agent-2",
+  "contextPath": "diagnostic-agent-2",
+  "version": "0.1.2",
+  "provider": {
+    "name": "Hackathon Team Orange"
+  },
+  "isolation": "PER_TENANT",
+  "scale": "NONE",
+  "replicas": 1,
+  "resources": {
+    "cpu": "500m",
+    "memory": "256Mi"
+  },
+  "requestedResources": {
+    "cpu": "100m",
+    "memory": "64Mi"
+  },
+  "livenessProbe": {
+    "httpGet": {
+      "path": "/health",
+      "port": 80
+    },
+    "initialDelaySeconds": 10,
+    "periodSeconds": 30,
+    "failureThreshold": 3
+  },
+  "readinessProbe": {
+    "httpGet": {
+      "path": "/health",
+      "port": 80
+    },
+    "initialDelaySeconds": 5,
+    "periodSeconds": 10
+  },
+  "requiredRoles": [
+    "ROLE_INVENTORY_READ",
+    "ROLE_INVENTORY_ADMIN",
+    "ROLE_IDENTITY_READ",
+    "ROLE_MEASUREMENT_READ",
+    "ROLE_ALARM_READ",
+    "ROLE_EVENT_READ"
+  ],
+  "roles": []
+}

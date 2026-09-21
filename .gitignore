@@ -3,3 +3,5 @@ result-*
 .claude-token
 simulator/devices.csv
 .envrc
+mcp/*.zip
+mcp/image.tar

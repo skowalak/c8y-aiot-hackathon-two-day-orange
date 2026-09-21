@@ -27,8 +27,8 @@ flowchart LR
     MCP -->|fan-out| C8Y[(Cumulocity APIs<br/>alarms/measurements/events)]
     C8Y --> MCP
     MCP -->|correlate + render| Report[Diagnostic Briefing]
-    Report -->|publish| Hosting[App Hosting]
-    Hosting -->|link| AAM
+    Report -->|publish| Hosting[Inventory binary<br/>+ /reports on the server]
+    Hosting -->|shareable link| AAM
 ```
 
 ## Device Simulator
@@ -119,3 +119,125 @@ failing device (coupling 1.0), `02`–`04` are neighbours on `Feeder-A` in group
 Episodes are intermittent and escalating (≈ -5d, -2d, -26h, -3h, fault) and
 telemetry has a 75 s gap after each brownout reset, so correlation across
 neighbours — not the firmware change — is the only consistent root cause.
+
+## MCP Server
+
+`mcp/` is the diagnostic server. It exposes a single tool,
+`analyze_device_failure`, over SSE, and it never writes to the tenant apart from
+storing the briefing it produces.
+
+```
+export C8Y_BASEURL=https://mytenant.eu-latest.cumulocity.com
+export C8Y_TENANT=t12345 C8Y_USER=me C8Y_PASSWORD=...
+
+cd mcp
+go run . -public-url https://mcp.example.com   # serve /sse, /reports/, /health
+go run . -analyze sim-node-01 -fault -3h -out briefing.html   # no MCP client needed
+```
+
+Useful flags: `-addr :8080`, `-reports-dir ./reports` (persist briefings across
+restarts), `-before 2h`, `-after 30m`, `-max-neighbors 6`, `-smart-rules` (also
+query the smart rule service for thresholds), `-v`.
+
+### The tool
+
+`analyze_device_failure` takes `device` (managed object ID, `c8y_Serial`, or
+name) and optionally `faultTime`, `symptom`, `beforeMinutes`, `afterMinutes`,
+`includeNeighbors`, `maxNeighbors`, `lookbackDays`. It returns a structured
+verdict for the agent plus a link to a rendered HTML briefing for the field
+team.
+
+### How it reaches a verdict
+
+1. **Resolve & fan out.** The device is looked up by ID, external ID or name,
+   its parent groups give the neighbouring assets, and all of them are
+   collected in parallel: measurements, alarms, events, firmware history, and
+   whatever threshold rules the inventory fragments (or smart rules) declare.
+2. **Detect.** Per series, a baseline is taken from the pre-fault window using
+   the median and MAD, so the sag itself cannot drag the baseline down. Two
+   kinds of anomaly come out of that: a *threshold breach* against a configured
+   limit, and a *deviation* of at least 6 sigma with a meaningful relative
+   change. Holes in the telemetry are found against the observed sample rate.
+3. **Correlate.** The strongest anomaly on the target is looked for on every
+   neighbour, and only counts as correlated if the onset is simultaneous. A
+   rule-backed breach outranks a statistical deviation here on purpose: at a
+   constant-power load the current rise is the *consequence* of the voltage sag,
+   and correlating on the consequence would point at the wrong quantity.
+4. **Conclude.** Neighbours on the same feeder sagging at the same second means
+   shared infrastructure; an anomaly nobody else sees means the device. The
+   firmware update is explicitly ruled out when it predates the first symptom or
+   also runs on unaffected assets, and the recommendations follow the scope —
+   inspect the supply rather than swap the node.
+
+### The briefing
+
+The report is a standalone HTML document: inline SVG charts per series with the
+threshold lines and the fault marker drawn in, the evidence tables, and the
+verdict. No scripts and no external resources, so it renders from a file, an
+email attachment or a link. A Markdown rendering of the same briefing is
+available for chat clients.
+
+It is published twice: as an inventory binary in the tenant (tagged
+`c8y_DiagnosticBriefing`, so it stays with the device history) and under
+`/reports/<id>.html` on this service, which is the link handed to the agent.
+`-public-url` decides what that link looks like; deployed as a microservice it
+is derived automatically.
+
+### Deploying as a Cumulocity microservice
+
+```
+cd mcp
+./package-microservice.sh                      # -> diagnostic-agent-2-<version>.zip
+./deploy-microservice.sh                       # upload + subscribe (uses C8Y_* env)
+```
+
+No Docker daemon is involved. The server is a static Go binary, so the image is
+a single layer holding the binary and a CA bundle, and `package-microservice.sh`
+writes the `docker save` tarball directly with `tar`. The build is deterministic
+and the result is a normal image that `docker load` or `skopeo` accepts. If you
+do have Docker, the equivalent `Dockerfile` is there too.
+
+`cumulocity.json` declares `PER_TENANT` isolation. That matters: the platform
+then injects `C8Y_TENANT`, `C8Y_USER` and `C8Y_PASSWORD` of the per-tenant
+service user, which are exactly the variables the server already reads, so no
+credential handling is needed for the deployed case. The required permissions
+are inventory read/admin (admin only to store the briefing), identity read and
+measurement, alarm and event read.
+
+Three things the platform imposes that the code has to account for:
+
+- **Port 80 only.** Set through `MCP_ADDR` in the image.
+- **The mount point is stripped.** Requests arrive at `/sse`, not
+  `/service/diagnostic-agent-2/sse`, but the SSE transport has to advertise its
+  POST endpoint *with* the prefix or the client posts to the tenant root. The
+  server restores it from `X-Forwarded-Prefix`, falling back to the configured
+  service name.
+- **`C8Y_BASEURL` is cluster-internal** (`http://cumulocity:8111`). Usable for
+  API calls, useless in a link, so the public domain is read once from
+  `/tenant/currentTenant` and used for everything a human opens.
+
+There are no volumes, so briefings live in memory plus the inventory binary;
+`-reports-dir` is for local runs only. Note also that the platform caps request
+lifetime at 15 minutes, which bounds how long a single SSE stream survives.
+
+### Registering with the AI Agent Manager
+
+The deployed microservice is just an endpoint until the `ai` application knows
+about it. Its registry lives behind `/service/ai/mcp/servers`:
+
+```sh
+./register-mcp-server.sh          # POST the registration, then list the tools
+./register-mcp-server.sh --test   # dry run: connect and enumerate tools only
+```
+
+`--test` hits `/service/ai/mcp/servers/test`, which opens the SSE stream,
+performs the MCP handshake and returns the discovered tool list without storing
+anything. It is the fastest way to tell a broken deployment from a broken
+registration.
+
+The registration itself is a small document: `name`, `description`, the public
+`/sse` URL, `type: sse` and `sendAuthentication: true`. The last flag makes the
+agent forward the calling user's credentials, so the diagnosis runs with that
+user's permissions rather than the service user's. Once stored, the tool shows
+up in the agent builder alongside the built-in `cumulocity-default` tools and
+can be attached to an agent.

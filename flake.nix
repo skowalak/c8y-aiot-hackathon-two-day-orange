@@ -19,6 +19,11 @@
             go
             gopls
             golangci-lint
+            # Packaging the microservice: gnutar/zip build the image tarball,
+            # curl talks to the application API. No Docker daemon required.
+            gnutar
+            zip
+            curl
           ];
         };
       });
