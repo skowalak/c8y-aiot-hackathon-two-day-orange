@@ -5,3 +5,5 @@ simulator/devices.csv
 .envrc
 mcp/*.zip
 mcp/image.tar
+simulator/*.zip
+simulator/image.tar

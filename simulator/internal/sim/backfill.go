@@ -21,11 +21,19 @@ type BackfillOptions struct {
 	Workers    int           // parallel nodes
 	Spec       FleetSpec
 	DryRun     bool
+	// Force seeds even if the node already holds measurements in the window.
+	Force bool
 }
 
 // Backfill writes the measurement history, the alarm history, the supply dip
 // and reset events and the firmware change history for the whole fleet. All
 // records are backdated, so a demo has a full week of evidence immediately.
+//
+// It is idempotent per node: a node that already holds measurements in the
+// target window is left alone. That matters because the simulator runs as a
+// microservice, and a container restart would otherwise lay a second copy of
+// the history on top of the first, doubling the sample density and skewing the
+// pre-fault baselines the diagnostic engine derives from it.
 func Backfill(ctx context.Context, client *c8y.Client, nodes []*Node, windows []Window, opt BackfillOptions) error {
 	start := opt.Fault.Add(-opt.History)
 	end := opt.Fault.Add(lastWindowTail(windows))
@@ -48,12 +56,25 @@ func Backfill(ctx context.Context, client *c8y.Client, nodes []*Node, windows []
 		return nil
 	}
 
+	todo := nodes
+	if !opt.Force {
+		var err error
+		if todo, err = unseeded(ctx, client, nodes, start, end, len(times)); err != nil {
+			return err
+		}
+		if len(todo) == 0 {
+			slog.Info("fleet already seeded for this window, skipping backfill",
+				"nodes", len(nodes), "hint", "-force-backfill to seed anyway, -purge to start over")
+			return nil
+		}
+	}
+
 	sem := make(chan struct{}, max(opt.Workers, 1))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var errs []error
 
-	for _, n := range nodes {
+	for _, n := range todo {
 		wg.Add(1)
 		go func(n *Node) {
 			defer wg.Done()
@@ -68,6 +89,40 @@ func Backfill(ctx context.Context, client *c8y.Client, nodes []*Node, windows []
 	}
 	wg.Wait()
 	return errors.Join(errs...)
+}
+
+// unseeded returns the nodes that hold no measurements in the target window.
+//
+// Any measurement at all is enough to skip a node: re-seeding on top of a
+// partial history would duplicate the part that is already there, and there is
+// no safe way to merge the two. A node that looks half-written is reported so
+// the operator can purge and start over instead.
+func unseeded(ctx context.Context, client *c8y.Client, nodes []*Node, from, to time.Time, expected int) ([]*Node, error) {
+	var out []*Node
+	for _, n := range nodes {
+		if n.ID == "" {
+			out = append(out, n)
+			continue
+		}
+		count, err := client.Count(ctx, "measurement/measurements", n.ID, from, to)
+		if err != nil {
+			return nil, fmt.Errorf("check seeded %s: %w", n.Serial, err)
+		}
+		if count == 0 {
+			out = append(out, n)
+			continue
+		}
+		// The count is per record, and one sample writes one record per series,
+		// so anything far below the sample count means an interrupted run.
+		if expected > 0 && count < expected/2 {
+			slog.Warn("node looks partially seeded and is left untouched",
+				"serial", n.Serial, "measurements", count, "samplesExpected", expected,
+				"hint", "run -purge and seed again")
+			continue
+		}
+		slog.Info("node already seeded, skipping", "serial", n.Serial, "measurements", count)
+	}
+	return out, nil
 }
 
 func backfillNode(ctx context.Context, client *c8y.Client, n *Node, times []time.Time, windows []Window, opt BackfillOptions) error {

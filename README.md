@@ -100,6 +100,47 @@ of a few dozen records. `-purge` widens the range to whole hours and repeats
 delete-and-verify until the counts stop dropping. If it still warns that data
 remains, something is publishing.
 
+### Running the simulator in the tenant
+
+The simulator is also packaged as a microservice, so a demo tenant keeps
+producing data without anybody's laptop being online:
+
+```
+cd simulator
+nix shell nixpkgs#zip nixpkgs#cacert --command ./package-microservice.sh
+./deploy-microservice.sh
+curl -u "$C8Y_TENANT/$C8Y_USER:$C8Y_PASSWORD" \
+  "$C8Y_BASEURL/service/brownout-simulator-2/health"
+```
+
+It needs no credentials of its own. Cumulocity injects `C8Y_BASEURL`,
+`C8Y_TENANT`, `C8Y_USER` and `C8Y_PASSWORD` for the subscribed tenant's
+service user, which is exactly what the flags already read from the
+environment; the manifest asks for the `*_ADMIN` roles on inventory, identity,
+measurements, alarms and events, because the simulator writes rather than
+reads.
+
+Three things had to change for the platform, and they explain the image
+defaults (`SIM_LISTEN=:80`, `SIM_MODE=both`, `SIM_TRANSPORT=rest`,
+`SIM_FAULT=-2h`):
+
+- **A health endpoint.** The platform restarts a container whose `/health`
+  does not answer, so the simulator serves one and reports its phase
+  (`starting`, `backfilling`, `live`, `idle`). It binds the socket before
+  seeding starts, because a week of backfill takes longer than the readiness
+  probe is willing to wait.
+- **REST instead of MQTT.** In the cluster the base URL is an internal address
+  with no broker behind it, and MQTT would need device credentials from a bulk
+  registration that cannot be handed to a running container. `-transport auto`
+  therefore detects the microservice and switches to REST.
+- **An idempotent backfill.** A container restarts on every rollout, and
+  seeding again would lay a second copy of the history on top of the first,
+  doubling the sample density and skewing the pre-fault baselines the
+  diagnostic engine derives from it. The backfill now counts the measurements
+  each device already holds in the target window and skips the ones that are
+  populated. `-force-backfill` overrides that, `-purge` is the honest way to
+  start over.
+
 ### Bulk device registration (optional)
 
 The simulator provisions the devices over the Inventory API by itself. If you

@@ -30,6 +30,7 @@ type options struct {
 
 	mode      string
 	transport string
+	listen    string
 
 	fault      string
 	history    string
@@ -49,6 +50,8 @@ type options struct {
 
 	registrationCSV string
 	devicePassword  string
+
+	forceBackfill bool
 
 	purge        bool
 	purgeHistory string
@@ -110,6 +113,16 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// The health endpoint comes up before any seeding, because a Cumulocity
+	// readiness probe that finds nothing listening restarts the container long
+	// before a week of backfill is written.
+	h := newHealth()
+	if opt.listen != "" {
+		if err := h.serve(ctx, opt.listen); err != nil {
+			return err
+		}
+	}
+
 	if opt.purge {
 		purgeHistory, err := parseDuration(opt.purgeHistory)
 		if err != nil {
@@ -131,6 +144,7 @@ func run() error {
 	}
 
 	if opt.mode == "backfill" || opt.mode == "both" {
+		h.set("backfilling")
 		err := sim.Backfill(ctx, client, nodes, windows, sim.BackfillOptions{
 			Fault:      fault,
 			History:    history,
@@ -140,6 +154,7 @@ func run() error {
 			Workers:    opt.workers,
 			Spec:       spec,
 			DryRun:     opt.dryRun,
+			Force:      opt.forceBackfill,
 		})
 		if err != nil {
 			return err
@@ -148,7 +163,8 @@ func run() error {
 	}
 
 	if (opt.mode == "live" || opt.mode == "both") && !opt.dryRun {
-		useMQTT := opt.transport == "mqtt" || opt.transport == "auto"
+		useMQTT := wantMQTT(opt)
+		h.set("live")
 		return sim.Live(ctx, client, nodes, sim.LiveOptions{
 			Interval:       opt.liveInterval,
 			BrownoutEvery:  opt.brownoutEvery,
@@ -157,6 +173,14 @@ func run() error {
 			UseMQTT:        useMQTT,
 			DevicePassword: opt.devicePassword,
 		})
+	}
+
+	// A microservice that returns from main is restarted in a loop, so when the
+	// work is done but a health endpoint is being served, stay up and idle.
+	if opt.listen != "" {
+		h.set("idle")
+		slog.Info("work done, idling to keep the health endpoint up")
+		<-ctx.Done()
 	}
 	return nil
 }
@@ -192,11 +216,12 @@ func parseFlags() options {
 	flag.StringVar(&opt.user, "user", os.Getenv("C8Y_USER"), "user name (env C8Y_USER)")
 	flag.StringVar(&opt.password, "password", os.Getenv("C8Y_PASSWORD"), "password (env C8Y_PASSWORD)")
 
-	flag.StringVar(&opt.mode, "mode", "both", "backfill | live | both")
-	flag.StringVar(&opt.transport, "transport", "auto", "live transport: auto (MQTT) | mqtt | rest")
+	flag.StringVar(&opt.mode, "mode", env("SIM_MODE", "both"), "backfill | live | both (env SIM_MODE)")
+	flag.StringVar(&opt.transport, "transport", env("SIM_TRANSPORT", "auto"), "live transport: auto (MQTT, or REST inside the cluster) | mqtt | rest (env SIM_TRANSPORT)")
+	flag.StringVar(&opt.listen, "listen", os.Getenv("SIM_LISTEN"), "serve a health endpoint on this address, e.g. :80; required as a Cumulocity microservice (env SIM_LISTEN)")
 
-	flag.StringVar(&opt.fault, "fault", "", "fault timestamp: RFC3339, relative (-2h) or empty for now")
-	flag.StringVar(&opt.history, "history", "7d", "history span to seed before the fault, e.g. 7d or 36h")
+	flag.StringVar(&opt.fault, "fault", os.Getenv("SIM_FAULT"), "fault timestamp: RFC3339, relative (-2h) or empty for now (env SIM_FAULT)")
+	flag.StringVar(&opt.history, "history", env("SIM_HISTORY", "7d"), "history span to seed before the fault, e.g. 7d or 36h (env SIM_HISTORY)")
 	flag.DurationVar(&opt.interval, "interval", time.Minute, "base sampling interval of the backfill")
 	flag.DurationVar(&opt.hfInterval, "hf-interval", 5*time.Second, "high frequency sampling interval around brownouts")
 	flag.IntVar(&opt.batch, "batch", 200, "measurements per bulk request")
@@ -211,6 +236,7 @@ func parseFlags() options {
 	flag.IntVar(&opt.baseline, "baseline", 2, "healthy nodes on the control feeder")
 	flag.StringVar(&opt.prefix, "prefix", "sim", "serial number prefix")
 
+	flag.BoolVar(&opt.forceBackfill, "force-backfill", false, "seed the history even if the devices already hold measurements in that window; duplicates data")
 	flag.BoolVar(&opt.purge, "purge", false, "delete the fleet's measurements, alarms and events (devices and groups are kept) and exit; stop any running live simulator first")
 	flag.StringVar(&opt.purgeHistory, "purge-history", "365d", "how far back -purge deletes, e.g. 30d or 48h")
 	flag.StringVar(&opt.registrationCSV, "registration-csv", "", "write a Cumulocity bulk device registration CSV to this path (- for stdout) and exit")
