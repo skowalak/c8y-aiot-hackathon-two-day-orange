@@ -36,6 +36,33 @@ export default defineNitroConfig({
       // Published OpenAPI spec route (served by Nitro) so the AI Agent Manager
       // and mc8yp can discover this microservice's HTTP surface.
       openApiSpec: 'openapi.json',
+
+      // Declared microservice settings. Cumulocity surfaces these as tenant
+      // options under the settings category (= contextPath, 'diagnostic-agent')
+      // and exposes them to the running container via
+      // GET /application/currentApplication/settings.
+      //
+      // The `credentials.` prefix marks the value as a secret: the platform
+      // stores it encrypted and only decrypts it for the microservice's own
+      // service user, so the key is never readable from the UI or the Options
+      // API by a normal user.
+      settings: [
+        {
+          key: 'credentials.anthropicApiKey',
+          // c8y-nitro requires a non-empty defaultValue. This placeholder is
+          // never a usable key: resolution treats it as "unset" so a missing
+          // configuration still fails loudly instead of silently authenticating.
+          defaultValue: 'unset',
+          editable: true,
+          inheritFromOwner: true,
+        },
+        {
+          key: 'anthropicModel',
+          defaultValue: 'claude-opus-4-8',
+          editable: true,
+          inheritFromOwner: true,
+        },
+      ],
       // MCP servers advertised to the Cumulocity AI Agent Manager so it can
       // discover and call their tools.
       exposeMcpServers: [

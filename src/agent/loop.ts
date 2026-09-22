@@ -11,7 +11,7 @@ import type { H3Event } from 'nitro/h3'
 import type Anthropic from '@anthropic-ai/sdk'
 
 import { fetchDeviceType, fetcherFromEvent, textFetcherFromEvent } from '../c8y/client'
-import { resolveAnthropicConfig } from '../config'
+import { resolveAnthropicConfigAsync } from '../config'
 import { getLogger } from '../log'
 import type { C8yFetcher, C8yTextFetcher } from '../c8y/client'
 import { recordWindow } from '../mcp/tools/record-window'
@@ -95,7 +95,7 @@ async function productionDeps(
   // Resolve through src/config.ts rather than reading runtimeConfig directly:
   // the build-time value is usually '' and the platform setting may be under the
   // plain ANTHROPIC_API_KEY name, which Nitro itself does not pick up.
-  const cfg = resolveAnthropicConfig(useRuntimeConfig())
+  const cfg = await resolveAnthropicConfigAsync(useRuntimeConfig())
   getLogger('config').info('anthropic config resolved', {
     source: cfg.source, // e.g. runtimeConfig | env:ANTHROPIC_API_KEY — never the key
     model: cfg.model,

@@ -80,3 +80,22 @@ describe('resolveAnthropicConfig', () => {
     expect(cfg.source).not.toContain('secret')
   })
 })
+
+describe('resolveAnthropicConfigAsync', () => {
+  it('returns the sync result without touching the platform', async () => {
+    const { resolveAnthropicConfigAsync } = await import('../src/config')
+    process.env.ANTHROPIC_API_KEY = 'env-key'
+    const cfg = await resolveAnthropicConfigAsync({})
+    expect(cfg.apiKey).toBe('env-key')
+    expect(cfg.source).toBe('env:ANTHROPIC_API_KEY')
+  })
+
+  // Outside Nitro the platform lookup cannot run, so the original (actionable)
+  // error must survive rather than being masked by the fallback's own failure.
+  it('rethrows the actionable error when nothing is configured', async () => {
+    const { resolveAnthropicConfigAsync } = await import('../src/config')
+    await expect(resolveAnthropicConfigAsync({})).rejects.toThrow(
+      /microservice setting/,
+    )
+  })
+})

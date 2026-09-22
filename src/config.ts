@@ -21,6 +21,9 @@ export interface AnthropicConfig {
 
 const DEFAULT_MODEL = 'claude-opus-4-8'
 
+/** manifest.settings requires a non-empty default; this value means "not configured". */
+const PLACEHOLDER_KEY = 'unset'
+
 const KEY_VARS = [
   'ANTHROPIC_API_KEY', // plain name: what a person naturally sets on the platform
   'NITRO_ANTHROPIC_API_KEY', // Nitro's runtimeConfig prefix
@@ -80,4 +83,72 @@ export function resolveAnthropicConfig(
   const model = runtimeModel || fromEnv(MODEL_VARS)?.value || DEFAULT_MODEL
 
   return { apiKey: key.value, model, source: key.source }
+}
+
+/**
+ * Read the key from the microservice's own Cumulocity settings
+ * (`GET /application/currentApplication/settings`).
+ *
+ * This is how a deployed microservice receives secrets: the value is declared in
+ * `manifest.settings` (see nitro.config.ts), stored as a tenant option under the
+ * settings category, and decrypted by the platform for this service only — the
+ * `credentials.` prefix keeps it out of the UI and the Options API for everyone
+ * else. Unlike env vars it needs no redeploy to rotate.
+ *
+ * Returns undefined (never throws) when running outside Nitro, when the
+ * platform call fails, or when nothing is configured, so the caller can fall
+ * back to env vars.
+ */
+export async function anthropicConfigFromPlatform(): Promise<
+  { apiKey: string; model?: string } | undefined
+> {
+  try {
+    const { useDeployedTenantClient } = await import('c8y-nitro/utils')
+    const client = await useDeployedTenantClient()
+    const res = await client.core.fetch('/application/currentApplication/settings', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    })
+    if (!res.ok) return undefined
+
+    const settings = (await res.json()) as Record<string, unknown>
+    const read = (key: string): string | undefined => {
+      const value = settings?.[key]
+      return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+    }
+
+    const apiKey = read('credentials.anthropicApiKey') ?? read('anthropicApiKey')
+    // 'unset' is the manifest's mandatory placeholder default, not a real key.
+    if (!apiKey || apiKey === PLACEHOLDER_KEY) return undefined
+    return { apiKey, model: read('anthropicModel') }
+  } catch {
+    // Outside Nitro (tests/local) or the platform call failed — caller falls back.
+    return undefined
+  }
+}
+
+/**
+ * Full resolution order for the deployed service: runtime config / env first
+ * (cheap, no network), then the platform settings. Falls back to the platform
+ * only when the synchronous sources yield nothing, so local runs stay offline.
+ */
+export async function resolveAnthropicConfigAsync(
+  runtimeConfig?: Record<string, unknown>,
+): Promise<AnthropicConfig> {
+  try {
+    return resolveAnthropicConfig(runtimeConfig)
+  } catch (error) {
+    const platform = await anthropicConfigFromPlatform()
+    if (!platform) throw error
+    return {
+      apiKey: platform.apiKey,
+      model:
+        platform.model ||
+        (typeof runtimeConfig?.anthropicModel === 'string'
+          ? runtimeConfig.anthropicModel
+          : '') ||
+        DEFAULT_MODEL,
+      source: 'platform:currentApplication/settings',
+    }
+  }
 }
