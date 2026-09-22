@@ -69,6 +69,15 @@ func (a Alarm) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// AlarmRef is an alarm as returned by a query, carrying the ID needed to
+// update it.
+type AlarmRef struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Status   string `json:"status"`
+	Severity string `json:"severity"`
+}
+
 // Event mirrors the Cumulocity event API payload.
 type Event struct {
 	Source Source         `json:"source"`

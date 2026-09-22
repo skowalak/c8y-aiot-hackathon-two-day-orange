@@ -77,6 +77,29 @@ Useful flags: `-fault -3h|<RFC3339>`, `-history 7d`, `-interval 1m`,
 `-hf-interval 5s`, `-neighbors 3`, `-baseline 2`, `-transport mqtt|rest`,
 `-brownout-every 15m`.
 
+### Starting over
+
+Seeding twice stacks a second copy of the history on top of the first, which
+ruins the baselines the diagnostic engine computes. `-purge` removes the
+fleet's measurements, alarms and events and then exits. Devices, groups,
+inventory fragments and external IDs survive on purpose: the next backfill
+reuses the same managed objects, so device IDs in reports and dashboards keep
+resolving.
+
+```
+go run . -purge -dry-run          # count what would be deleted
+go run . -purge                   # delete it, keeping the devices
+go run . -mode backfill -fault -2h
+```
+
+Stop any running live simulator first, otherwise it refills the tenant behind
+the purge. Two platform details are worth knowing, both handled by the tool:
+`DELETE /measurement/measurements` rejects a date range that is not truncated
+to the hour, and it deletes asynchronously, so a single pass leaves a residue
+of a few dozen records. `-purge` widens the range to whole hours and repeats
+delete-and-verify until the counts stop dropping. If it still warns that data
+remains, something is publishing.
+
 ### Bulk device registration (optional)
 
 The simulator provisions the devices over the Inventory API by itself. If you

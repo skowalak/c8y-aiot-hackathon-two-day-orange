@@ -50,6 +50,9 @@ type options struct {
 	registrationCSV string
 	devicePassword  string
 
+	purge        bool
+	purgeHistory string
+
 	dryRun  bool
 	verbose bool
 }
@@ -106,6 +109,20 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if opt.purge {
+		purgeHistory, err := parseDuration(opt.purgeHistory)
+		if err != nil {
+			return fmt.Errorf("-purge-history: %w", err)
+		}
+		now := time.Now()
+		return sim.Purge(ctx, client, nodes, sim.PurgeOptions{
+			From:    now.Add(-purgeHistory),
+			To:      now.Add(time.Hour),
+			Workers: opt.workers,
+			DryRun:  opt.dryRun,
+		})
+	}
 
 	if !opt.dryRun {
 		if err := sim.Provision(ctx, client, nodes, spec); err != nil {
@@ -194,6 +211,8 @@ func parseFlags() options {
 	flag.IntVar(&opt.baseline, "baseline", 2, "healthy nodes on the control feeder")
 	flag.StringVar(&opt.prefix, "prefix", "sim", "serial number prefix")
 
+	flag.BoolVar(&opt.purge, "purge", false, "delete the fleet's measurements, alarms and events (devices and groups are kept) and exit; stop any running live simulator first")
+	flag.StringVar(&opt.purgeHistory, "purge-history", "365d", "how far back -purge deletes, e.g. 30d or 48h")
 	flag.StringVar(&opt.registrationCSV, "registration-csv", "", "write a Cumulocity bulk device registration CSV to this path (- for stdout) and exit")
 	flag.StringVar(&opt.devicePassword, "device-password", os.Getenv("C8Y_DEVICE_PASSWORD"), "device credentials from the bulk registration CSV; used for the live MQTT phase (env C8Y_DEVICE_PASSWORD)")
 	flag.BoolVar(&opt.dryRun, "dry-run", false, "generate and log the scenario without calling Cumulocity")

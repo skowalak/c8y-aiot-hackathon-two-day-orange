@@ -276,3 +276,76 @@ func (c *Client) CreateEvent(ctx context.Context, e Event) (string, error) {
 	}
 	return res.ID, nil
 }
+
+// Count returns how many items a collection holds for one device in the given
+// range. collection is an API path such as "measurement/measurements".
+// Requesting one item per page makes the page count the item count.
+func (c *Client) Count(ctx context.Context, collection, sourceID string, from, to time.Time) (int, error) {
+	q := url.Values{
+		"source":         {sourceID},
+		"dateFrom":       {from.UTC().Format(time.RFC3339)},
+		"dateTo":         {to.UTC().Format(time.RFC3339)},
+		"pageSize":       {"1"},
+		"withTotalPages": {"true"},
+	}
+	var res struct {
+		Statistics struct {
+			TotalPages int `json:"totalPages"`
+		} `json:"statistics"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/"+collection+"?"+q.Encode(), nil, ctJSON, &res); err != nil {
+		return 0, err
+	}
+	return res.Statistics.TotalPages, nil
+}
+
+// ActiveAlarms returns the active alarms of one device, optionally filtered by
+// type. Needed because the alarm API can only be updated by ID.
+func (c *Client) ActiveAlarms(ctx context.Context, sourceID, alarmType string) ([]AlarmRef, error) {
+	q := url.Values{
+		"source":   {sourceID},
+		"status":   {"ACTIVE"},
+		"pageSize": {"100"},
+	}
+	if alarmType != "" {
+		q.Set("type", alarmType)
+	}
+	var res struct {
+		Alarms []AlarmRef `json:"alarms"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/alarm/alarms?"+q.Encode(), nil, ctJSON, &res); err != nil {
+		return nil, err
+	}
+	return res.Alarms, nil
+}
+
+// DeleteMeasurements removes every measurement of one device in the given
+// range. The measurement API refuses a bulk delete without a date range.
+func (c *Client) DeleteMeasurements(ctx context.Context, sourceID string, from, to time.Time) error {
+	q := url.Values{
+		"source":   {sourceID},
+		"dateFrom": {from.UTC().Format(time.RFC3339)},
+		"dateTo":   {to.UTC().Format(time.RFC3339)},
+	}
+	return c.do(ctx, http.MethodDelete, "/measurement/measurements?"+q.Encode(), nil, ctJSON, nil)
+}
+
+// DeleteAlarms removes every alarm of one device in the given range.
+func (c *Client) DeleteAlarms(ctx context.Context, sourceID string, from, to time.Time) error {
+	q := url.Values{
+		"source":   {sourceID},
+		"dateFrom": {from.UTC().Format(time.RFC3339)},
+		"dateTo":   {to.UTC().Format(time.RFC3339)},
+	}
+	return c.do(ctx, http.MethodDelete, "/alarm/alarms?"+q.Encode(), nil, ctJSON, nil)
+}
+
+// DeleteEvents removes every event of one device in the given range.
+func (c *Client) DeleteEvents(ctx context.Context, sourceID string, from, to time.Time) error {
+	q := url.Values{
+		"source":   {sourceID},
+		"dateFrom": {from.UTC().Format(time.RFC3339)},
+		"dateTo":   {to.UTC().Format(time.RFC3339)},
+	}
+	return c.do(ctx, http.MethodDelete, "/event/events?"+q.Encode(), nil, ctJSON, nil)
+}

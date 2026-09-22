@@ -156,9 +156,18 @@ func (p *restPublisher) Alarm(ctx context.Context, n *Node, severity, alarmType,
 	return err
 }
 
-func (p *restPublisher) ClearAlarm(context.Context, *Node, string) error {
-	// Clearing by type requires a query; the live REST path leaves alarms
-	// active and relies on the next episode to update the alarm count.
+// ClearAlarm mirrors the MQTT path: the alarm API can only be updated by ID, so
+// the active alarms of that type have to be queried first.
+func (p *restPublisher) ClearAlarm(ctx context.Context, n *Node, alarmType string) error {
+	active, err := p.client.ActiveAlarms(ctx, n.ID, alarmType)
+	if err != nil {
+		return err
+	}
+	for _, a := range active {
+		if err := p.client.UpdateAlarmStatus(ctx, a.ID, "CLEARED"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
