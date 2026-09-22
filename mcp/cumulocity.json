@@ -2,7 +2,7 @@
   "apiVersion": "2",
   "name": "diagnostic-agent-2",
   "contextPath": "diagnostic-agent-2",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "provider": {
     "name": "Hackathon Team Orange"
   },

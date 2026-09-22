@@ -138,11 +138,29 @@ func kindRank(kind string) int {
 	}
 }
 
+// simultaneousOnset is the skew within which two onsets count as the same
+// moment. Series are sampled at different rates, so a minute of difference is
+// measurement granularity rather than a causal ordering.
+const simultaneousOnset = 2 * time.Minute
+
 // stronger reports whether a is better root-cause evidence than b:
 // >0 if a wins, <0 if b wins, 0 if indistinguishable.
 func stronger(a, b *Anomaly) int {
 	if ra, rb := kindRank(a.Kind), kindRank(b.Kind); ra != rb {
 		return ra - rb
+	}
+	// Among equally rule-backed anomalies the earlier one wins, because an
+	// effect cannot precede its cause. Without this the ranking follows the
+	// configured severity of the threshold rule, which says how much somebody
+	// cared about that limit, not which quantity moved first: a feeder
+	// brownout would be reported as an over-temperature fault simply because
+	// the temperature rule was authored CRITICAL and the voltage rule MAJOR,
+	// sending a technician to check ventilation instead of the supply.
+	if d := a.Onset.Sub(b.Onset); d.Abs() > simultaneousOnset {
+		if d < 0 {
+			return 1
+		}
+		return -1
 	}
 	if ra, rb := severityRank(a.Severity), severityRank(b.Severity); ra != rb {
 		return ra - rb

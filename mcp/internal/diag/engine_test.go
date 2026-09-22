@@ -46,8 +46,14 @@ func fakeTenant(t *testing.T, children []string) *httptest.Server {
 	t.Helper()
 
 	mo := func(d device) string {
+		// The temperature rule is CRITICAL while the voltage rule is only MAJOR,
+		// as a real tenant would have it: somebody cared more about overheating
+		// than about supply quality. That must not decide the root cause.
 		kind, thresholds := "sim_PowerNode", `,
- "sim_Thresholds":{"sim_Voltage.U":{"min":207,"max":253,"severity":"MAJOR","alarmType":"sim_UnderVoltage","unit":"V"}}`
+ "sim_Thresholds":{
+  "sim_Voltage.U":{"min":207,"max":253,"severity":"MAJOR","alarmType":"sim_UnderVoltage","unit":"V"},
+  "sim_Temperature.T":{"max":52,"severity":"CRITICAL","alarmType":"sim_OverTemperature","unit":"C"}
+ }`
 		if d.door {
 			kind, thresholds = "sim_DoorSensor", ""
 		}
@@ -91,16 +97,23 @@ func fakeTenant(t *testing.T, children []string) *httptest.Server {
  "source":{"id":%q},"sim_Door":{"state":{"value":0,"unit":""}}}`, ts.Format(time.RFC3339), d.id))
 				continue
 			}
-			voltage, current := 230.0, 12.0
+			voltage, current, temp := 230.0, 12.0, 40.0
 			if i := ts.Sub(from).Minutes(); int(i)%3 == 0 {
-				voltage, current = 230.4, 12.2 // benign jitter
+				voltage, current, temp = 230.4, 12.2, 40.2 // benign jitter
 			}
 			if !d.healthy && !ts.Before(fault) && ts.Before(fault.Add(10*time.Minute)) {
 				voltage, current = d.sagTo, 18.5
 			}
+			// The controller compensates the sag with more current and only then
+			// runs hot, so the thermal breach trails the electrical one.
+			if !d.healthy && !ts.Before(fault.Add(5*time.Minute)) && ts.Before(fault.Add(12*time.Minute)) {
+				temp = 54.5
+			}
 			items = append(items, fmt.Sprintf(`{"id":"m","time":%q,"type":"sim_PowerNodeTelemetry",
  "source":{"id":%q},"sim_Voltage":{"U":{"value":%.1f,"unit":"V"}},
- "sim_Current":{"I":{"value":%.1f,"unit":"A"}}}`, ts.Format(time.RFC3339), d.id, voltage, current))
+ "sim_Current":{"I":{"value":%.1f,"unit":"A"}},
+ "sim_Temperature":{"T":{"value":%.1f,"unit":"C"}}}`,
+				ts.Format(time.RFC3339), d.id, voltage, current, temp))
 		}
 		_, _ = fmt.Fprintf(w, `{"measurements":[%s],"next":""}`, strings.Join(items, ","))
 	})
@@ -294,6 +307,32 @@ func TestNoComparableNeighbourLowersConfidence(t *testing.T) {
 	joined := strings.ToLower(strings.Join(b.Verdict.Reasoning, " | "))
 	if !strings.Contains(joined, "neither be confirmed nor excluded") {
 		t.Fatalf("reasoning does not flag the missing comparison: %v", b.Verdict.Reasoning)
+	}
+}
+
+// TestLeadingAnomalyIsTheEarliestNotTheLoudest guards which quantity the
+// briefing blames. The power nodes sag first and only then run hot, but the
+// tenant's temperature rule is CRITICAL where the voltage rule is MAJOR. If
+// rule severity outranks onset, the engine reports an over-temperature fault
+// and sends the technician to check ventilation while the feeder keeps
+// browning out.
+func TestLeadingAnomalyIsTheEarliestNotTheLoudest(t *testing.T) {
+	b := analyse(t, baseRequest())
+
+	if len(b.Target.Anomalies) < 2 {
+		t.Fatalf("expected both the sag and the thermal breach, got %+v", b.Target.Anomalies)
+	}
+	lead := b.Target.Anomalies[0]
+	if lead.Series != "sim_Voltage.U" {
+		t.Fatalf("leading anomaly = %q (severity %s, onset %s), want sim_Voltage.U: the cause precedes the consequence",
+			lead.Series, lead.Severity, lead.Onset)
+	}
+	if b.Correlation == nil || b.Correlation.Series != "sim_Voltage.U" {
+		t.Fatalf("correlation follows the wrong series: %+v", b.Correlation)
+	}
+	joined := strings.ToLower(strings.Join(b.Recommendations, " | "))
+	if !strings.Contains(joined, "supply") {
+		t.Fatalf("recommendations do not point at the supply: %v", b.Recommendations)
 	}
 }
 

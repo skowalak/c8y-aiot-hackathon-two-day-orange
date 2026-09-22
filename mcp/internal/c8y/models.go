@@ -211,3 +211,10 @@ func extraFragments(data []byte, reserved map[string]bool) map[string]json.RawMe
 	}
 	return out
 }
+
+// IsDevice reports whether the managed object is a device rather than a group
+// or another asset. Only devices can be diagnosed.
+func (m *ManagedObject) IsDevice() bool {
+	_, ok := m.Fragments["c8y_IsDevice"]
+	return ok
+}

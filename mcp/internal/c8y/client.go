@@ -84,10 +84,25 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("c8y: GET %s: %d: %s", e.path, e.status, e.body)
 }
 
-// NotFound reports whether err is a 404.
+// notFoundError is a lookup that legitimately found nothing, as opposed to a
+// failed request. It lets a resolver widen its search without matching on
+// error strings.
+type notFoundError struct{ msg string }
+
+func (e *notFoundError) Error() string { return e.msg }
+
+func notFoundf(format string, args ...any) error {
+	return &notFoundError{msg: fmt.Sprintf(format, args...)}
+}
+
+// NotFound reports whether err is a 404 or an empty lookup result.
 func NotFound(err error) bool {
 	var apiErr *apiError
-	return errors.As(err, &apiErr) && apiErr.status == http.StatusNotFound
+	if errors.As(err, &apiErr) && apiErr.status == http.StatusNotFound {
+		return true
+	}
+	var nf *notFoundError
+	return errors.As(err, &nf)
 }
 
 func (c *Client) get(ctx context.Context, path string, out any) error {
@@ -158,20 +173,56 @@ func (c *Client) ResolveDevice(ctx context.Context, ref string) (*ManagedObject,
 			return nil, err
 		}
 	}
+	// Exact name first, then a prefix match. Operators quote devices the way
+	// they are labelled in the field ("Power Node 01"), while the inventory
+	// name often carries an extra qualifier ("Power Node 01 (Feeder-A)"), and
+	// an exact-only match would send the caller away over a suffix. A prefix
+	// hit is only accepted when it is unambiguous: guessing between several
+	// devices is worse than asking.
+	mo, err := c.deviceByName(ctx, fmt.Sprintf("name eq '%s'", escapeQuery(ref)), ref)
+	if err == nil || !NotFound(err) {
+		return mo, err
+	}
+	return c.deviceByName(ctx, fmt.Sprintf("name eq '%s*'", escapeQuery(ref)), ref)
+}
+
+// escapeQuery strips the quote that would otherwise break out of the inventory
+// query literal.
+func escapeQuery(s string) string {
+	return strings.ReplaceAll(s, "'", "")
+}
+
+func (c *Client) deviceByName(ctx context.Context, query, ref string) (*ManagedObject, error) {
 	q := url.Values{}
-	q.Set("query", fmt.Sprintf("name eq '%s'", strings.ReplaceAll(ref, "'", "")))
-	q.Set("pageSize", "2")
+	q.Set("query", query)
+	q.Set("pageSize", "5")
 	var res struct {
 		ManagedObjects []ManagedObject `json:"managedObjects"`
 	}
 	if err := c.get(ctx, "/inventory/managedObjects?"+q.Encode(), &res); err != nil {
 		return nil, err
 	}
-	if len(res.ManagedObjects) == 0 {
-		return nil, fmt.Errorf("c8y: no device found for %q", ref)
+	// Groups and other assets can carry a matching name too; only devices can
+	// be diagnosed.
+	var devices []ManagedObject
+	for _, mo := range res.ManagedObjects {
+		if mo.IsDevice() {
+			devices = append(devices, mo)
+		}
 	}
-	// Re-fetch by ID so the parent references are populated.
-	return c.ManagedObject(ctx, res.ManagedObjects[0].ID)
+	switch len(devices) {
+	case 0:
+		return nil, notFoundf("c8y: no device found for %q", ref)
+	case 1:
+		// Re-fetch by ID so the parent references are populated.
+		return c.ManagedObject(ctx, devices[0].ID)
+	}
+	names := make([]string, 0, len(devices))
+	for _, d := range devices {
+		names = append(names, fmt.Sprintf("%s (id %s)", d.Name, d.ID))
+	}
+	return nil, fmt.Errorf("c8y: %q matches several devices, name one of them exactly: %s",
+		ref, strings.Join(names, ", "))
 }
 
 // ChildAssets returns the child assets of a managed object.

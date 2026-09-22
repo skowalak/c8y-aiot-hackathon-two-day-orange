@@ -226,7 +226,14 @@ team.
    neighbour, and only counts as correlated if the onset is simultaneous. A
    rule-backed breach outranks a statistical deviation here on purpose: at a
    constant-power load the current rise is the *consequence* of the voltage sag,
-   and correlating on the consequence would point at the wrong quantity.
+   and correlating on the consequence would point at the wrong quantity. Among
+   equally rule-backed breaches the *earlier* one wins, because an effect cannot
+   precede its cause. Threshold severity deliberately does not decide this: it
+   records how much somebody cared about a limit when they configured it, not
+   which quantity moved first. A feeder brownout whose temperature rule happens
+   to be CRITICAL and whose voltage rule is MAJOR would otherwise be reported as
+   an over-temperature fault, sending a technician to check ventilation while the
+   supply keeps collapsing.
 4. **Conclude.** Neighbours on the same feeder sagging at the same second means
    shared infrastructure; an anomaly nobody else sees means the device. The
    firmware update is explicitly ruled out when it predates the first symptom or

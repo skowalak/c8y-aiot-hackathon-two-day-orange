@@ -24,9 +24,18 @@ func recorder(t *testing.T) (*c8y.Client, *[]string) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"not found"}`))
 		case r.URL.Path == "/inventory/managedObjects":
-			_, _ = w.Write([]byte(`{"managedObjects":[{"id":"151156","name":"Power Node 01"}]}`))
+			// The inventory name carries a qualifier the operator does not say,
+			// so only the prefix query finds it.
+			if !strings.Contains(r.URL.RawQuery, "%2A") { // '*'
+				_, _ = w.Write([]byte(`{"managedObjects":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"managedObjects":[
+{"id":"151157","name":"Power Node 01 Group"},
+{"id":"151156","name":"Power Node 01 (Feeder-A)","c8y_IsDevice":{}}]}`))
 		case strings.HasPrefix(r.URL.Path, "/inventory/managedObjects/"):
-			_, _ = w.Write([]byte(`{"id":"151156","name":"Power Node 01","type":"sim_PowerNode",
+			_, _ = w.Write([]byte(`{"id":"151156","name":"Power Node 01 (Feeder-A)","type":"sim_PowerNode",
+"c8y_IsDevice":{},
 "assetParents":{"references":[{"managedObject":{"id":"151157","name":"SIM Substation Alpha"}}]}}`))
 		default:
 			http.NotFound(w, r)
@@ -127,5 +136,33 @@ func TestResolveDeviceRequestsParents(t *testing.T) {
 				t.Errorf("managed object fetched without withParents=true: %v", *paths)
 			}
 		})
+	}
+}
+
+// Guessing between devices is worse than asking: a briefing about the wrong
+// node is indistinguishable from a correct one to the reader.
+func TestResolveDeviceRefusesAmbiguousName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/inventory/managedObjects" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"managedObjects":[
+{"id":"1","name":"Power Node 01 (Feeder-A)","c8y_IsDevice":{}},
+{"id":"2","name":"Power Node 02 (Feeder-A)","c8y_IsDevice":{}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := c8y.New(c8y.Config{BaseURL: srv.URL, Tenant: "t1", User: "u", Password: "p"})
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	_, err = client.ResolveDevice(context.Background(), "Power Node")
+	if err == nil {
+		t.Fatal("ambiguous name resolved to a single device")
+	}
+	if !strings.Contains(err.Error(), "matches several devices") {
+		t.Fatalf("error does not name the candidates: %v", err)
 	}
 }
