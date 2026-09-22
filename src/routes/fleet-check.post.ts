@@ -15,6 +15,7 @@
 // authenticated request client.
 
 import { defineHandler, readBody, createError } from 'nitro/h3'
+import { useLogger } from 'c8y-nitro/utils'
 import {
   fetcherFromEvent,
   listDeviceIdsByType,
@@ -34,6 +35,17 @@ interface Body {
 export default defineHandler(async (event) => {
   const body = (await readBody<Body>(event)) ?? {}
   const fetch = fetcherFromEvent(event)
+  const log = useLogger(event)
+  log.info('fleet-check request received', {
+    operation: 'fleet-check',
+    selector: body.deviceIds
+      ? 'deviceIds'
+      : body.serials
+        ? 'serials'
+        : body.discoverType
+          ? 'discoverType'
+          : 'none',
+  })
 
   // Resolve the device list from whichever selector was provided.
   let deviceIds: string[] = []
@@ -63,10 +75,20 @@ export default defineHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'No devices to check' })
   }
 
-  return runFleetCheck(event, {
+  log.info('checking fleet', {
+    operation: 'fleet-check',
+    deviceCount: deviceIds.length,
+  })
+  const result = await runFleetCheck(event, {
     deviceIds,
     pass1WindowMinutes: body.pass1WindowMinutes,
     pass2WaitSeconds: body.pass2WaitSeconds,
     pass2WindowMinutes: body.pass2WindowMinutes,
   })
+  log.info('fleet-check complete', {
+    operation: 'fleet-check',
+    checked: result.checked,
+    culprit: result.culprit?.deviceId ?? null,
+  })
+  return result
 })

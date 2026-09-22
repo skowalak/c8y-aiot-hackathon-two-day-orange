@@ -1,9 +1,12 @@
+# NOTE: c8y-nitro's generated Docker build uses the PROJECT ROOT as its build
+# context and its Dockerfile does `COPY .output/ .output/`, so .output must NOT
+# be excluded here. Keep out only heavy/irrelevant/secret paths.
+
 node_modules
-.output
 .nitro
 .data
 dist
-*.zip
+docker
 
 # secrets — never send to the build context
 .env
@@ -11,11 +14,9 @@ dist
 
 # vcs / tooling / other stacks
 .git
-.gitignore
 simulator
 docs
 test
-*.md
 result
 result-*
 .claude-token

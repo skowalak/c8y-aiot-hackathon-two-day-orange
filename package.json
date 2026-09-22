@@ -1,6 +1,6 @@
 {
   "name": "c8y-diagnostic-agent",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "description": "AI Diagnostic Agent & Diagnostic MCP Server for Cumulocity IoT (Nitro microservice)",
@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "nitro dev",
     "build": "nitro build",
-    "preview": "node .output/server/index.mjs",
+    "preview": "node --env-file-if-exists=.env .output/server/index.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

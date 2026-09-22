@@ -17,6 +17,9 @@ import type {
 /** Minimal seam over Cumulocity GETs: given a REST path, return parsed JSON. */
 export type C8yFetcher = (path: string) => Promise<any>
 
+/** Fetches raw text (not JSON) from a Cumulocity path — for binary/file content. */
+export type C8yTextFetcher = (path: string) => Promise<string | undefined>
+
 /**
  * Production fetcher: authenticated Cumulocity client from the request event.
  *
@@ -26,6 +29,15 @@ export type C8yFetcher = (path: string) => Promise<any>
  * in. The returned fetcher resolves the client on first use and caches it.
  */
 export function fetcherFromEvent(event: H3Event): C8yFetcher {
+  const raw = rawFetcherFromEvent(event)
+  return async (path: string) => {
+    const res = await raw(path)
+    return res.json()
+  }
+}
+
+// Shared lazy client resolver returning the raw c8y fetch (IFetchResponse).
+function rawFetcherFromEvent(event: H3Event) {
   let clientPromise: Promise<any> | undefined
   return async (path: string) => {
     if (!clientPromise) {
@@ -34,8 +46,27 @@ export function fetcherFromEvent(event: H3Event): C8yFetcher {
       )
     }
     const client = await clientPromise
-    const res = await client.core.fetch(path)
-    return res.json()
+    return client.core.fetch(path)
+  }
+}
+
+/**
+ * Text fetcher for reading file/binary content (e.g. a knowledge Markdown file
+ * from the Cumulocity file repository / Dateiablage). Returns undefined on a
+ * non-OK response so callers can fall back to bundled files.
+ */
+export function textFetcherFromEvent(event: H3Event): C8yTextFetcher {
+  const raw = rawFetcherFromEvent(event)
+  return async (path: string) => {
+    try {
+      const res = await raw(path)
+      if (res?.ok === false || (typeof res?.status === 'number' && res.status >= 400)) {
+        return undefined
+      }
+      return await res.text()
+    } catch {
+      return undefined
+    }
   }
 }
 
@@ -128,6 +159,36 @@ export async function fetchEvents(
     type: e.type,
     text: e.text,
   }))
+}
+
+/**
+ * Read a knowledge Markdown file from the Cumulocity file repository (Inventory
+ * Binaries / "Dateiablage") by its file name (e.g. "sim_PowerNode.md").
+ *
+ * Inventory Binaries are managed objects with a `c8y_IsBinary` fragment and a
+ * `name`; their bytes are downloaded from /inventory/binaries/<id>. We locate the
+ * binary by name via the inventory query API, then download it as text. Returns
+ * undefined if not found so the caller can fall back to bundled files.
+ */
+export async function fetchKnowledgeBinary(
+  json: C8yFetcher,
+  text: C8yTextFetcher,
+  fileName: string,
+): Promise<string | undefined> {
+  const query = encodeURIComponent(
+    `has(c8y_IsBinary) and name eq '${fileName}'`,
+  )
+  let listing: any
+  try {
+    listing = await json(
+      `/inventory/managedObjects?query=${query}&pageSize=1`,
+    )
+  } catch {
+    return undefined
+  }
+  const id = listing?.managedObjects?.[0]?.id
+  if (!id) return undefined
+  return text(`/inventory/binaries/${encodeURIComponent(String(id))}`)
 }
 
 /** Resolve a device's `type` from the inventory (for knowledge-base lookup). */

@@ -46,7 +46,13 @@ describe('diagnostic MCP server', () => {
     const { tools } = await client.listTools()
     const names = tools.map((t) => t.name).sort()
     expect(names).toEqual(
-      ['clear_session', 'get_expectations', 'query_local', 'record_window'].sort(),
+      [
+        'check_device_types',
+        'clear_session',
+        'get_expectations',
+        'query_local',
+        'record_window',
+      ].sort(),
     )
     await client.close()
   })

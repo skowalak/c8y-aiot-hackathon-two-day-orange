@@ -73,6 +73,15 @@ export function makeFleetFetcher(): C8yFetcher {
     const source = sourceMatch ? decodeURIComponent(sourceMatch[1]) : ''
     const device = FLEET.find((d) => d.id === source)
 
+    // Inventory list query — device discovery by type (listDeviceIdsByType).
+    if (path.startsWith('/inventory/managedObjects?')) {
+      if (path.includes(encodeURIComponent(POWER_NODE_TYPE)) || path.includes(POWER_NODE_TYPE)) {
+        return { managedObjects: FLEET.map((d) => ({ id: d.id, type: POWER_NODE_TYPE })) }
+      }
+      return { managedObjects: [] }
+    }
+
+    // Single managed object — device type resolution.
     if (path.startsWith('/inventory/managedObjects/')) {
       return { id: source || 'unknown', type: POWER_NODE_TYPE, name: 'Power Node' }
     }

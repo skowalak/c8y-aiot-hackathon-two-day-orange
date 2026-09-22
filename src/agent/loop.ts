@@ -10,8 +10,10 @@
 import type { H3Event } from 'nitro/h3'
 import type Anthropic from '@anthropic-ai/sdk'
 
-import { fetchDeviceType, fetcherFromEvent } from '../c8y/client'
-import type { C8yFetcher } from '../c8y/client'
+import { fetchDeviceType, fetcherFromEvent, textFetcherFromEvent } from '../c8y/client'
+import { resolveAnthropicConfig } from '../config'
+import { getLogger } from '../log'
+import type { C8yFetcher, C8yTextFetcher } from '../c8y/client'
 import { recordWindow } from '../mcp/tools/record-window'
 import { queryLocal } from '../mcp/tools/query-local'
 import { getExpectations } from '../mcp/tools/get-expectations'
@@ -48,6 +50,9 @@ export interface DiagnoseOptions {
   pass2WindowMinutes?: number
   // Injected dependencies (production builds these from the event + config).
   fetch?: C8yFetcher
+  // Optional text fetcher for reading the knowledge Markdown from the Cumulocity
+  // file repository (Dateiablage). When omitted, bundled knowledge files are used.
+  text?: C8yTextFetcher
   reasoner?: Reasoner
 }
 
@@ -82,19 +87,24 @@ export function claudeReasoner(client: Anthropic, model: string): Reasoner {
  */
 async function productionDeps(
   event: H3Event,
-): Promise<{ fetch: C8yFetcher; reasoner: Reasoner }> {
+): Promise<{ fetch: C8yFetcher; text: C8yTextFetcher; reasoner: Reasoner }> {
   const [{ useRuntimeConfig }, { default: Anthropic }] = await Promise.all([
     import('nitro/runtime-config'),
     import('@anthropic-ai/sdk'),
   ])
-  const cfg = useRuntimeConfig()
-  if (!cfg.anthropicApiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not configured')
-  }
-  const claude = new Anthropic({ apiKey: cfg.anthropicApiKey })
+  // Resolve through src/config.ts rather than reading runtimeConfig directly:
+  // the build-time value is usually '' and the platform setting may be under the
+  // plain ANTHROPIC_API_KEY name, which Nitro itself does not pick up.
+  const cfg = resolveAnthropicConfig(useRuntimeConfig())
+  getLogger('config').info('anthropic config resolved', {
+    source: cfg.source, // e.g. runtimeConfig | env:ANTHROPIC_API_KEY — never the key
+    model: cfg.model,
+  })
+  const claude = new Anthropic({ apiKey: cfg.apiKey })
   return {
     fetch: fetcherFromEvent(event),
-    reasoner: claudeReasoner(claude, cfg.anthropicModel),
+    text: textFetcherFromEvent(event),
+    reasoner: claudeReasoner(claude, cfg.model),
   }
 }
 
@@ -115,6 +125,7 @@ export async function runDiagnosis(
   } = opts
 
   let fetch = opts.fetch
+  let text = opts.text
   let reasoner = opts.reasoner
   if (!fetch || !reasoner) {
     if (!event) {
@@ -122,6 +133,7 @@ export async function runDiagnosis(
     }
     const deps = await productionDeps(event)
     fetch = fetch ?? deps.fetch
+    text = text ?? deps.text
     reasoner = reasoner ?? deps.reasoner
   }
 
@@ -130,7 +142,12 @@ export async function runDiagnosis(
   startSession(sessionId, deviceId, deviceType)
 
   try {
-    const expectations = await getExpectations({ sessionId })
+    // Prefer the knowledge Markdown from the Cumulocity file repository
+    // (Dateiablage) when a text fetcher is available; else bundled files.
+    const expectations = await getExpectations(
+      { sessionId },
+      text ? { json: fetch, text } : undefined,
+    )
 
     // --- PASS 1: RECORD ---
     const now1 = Date.now()

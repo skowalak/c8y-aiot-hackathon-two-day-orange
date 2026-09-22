@@ -18,6 +18,7 @@ export interface FleetCheckOptions {
   pass2WindowMinutes?: number
   // Injected dependencies (production builds these from the event + config).
   fetch?: DiagnoseOptions['fetch']
+  text?: DiagnoseOptions['text']
   reasoner?: DiagnoseOptions['reasoner']
 }
 
@@ -62,6 +63,7 @@ export async function runFleetCheck(
         pass2WaitSeconds: opts.pass2WaitSeconds,
         pass2WindowMinutes: opts.pass2WindowMinutes,
         fetch: opts.fetch,
+        text: opts.text,
         reasoner: opts.reasoner,
       })
       results.push({ deviceId, verdict })

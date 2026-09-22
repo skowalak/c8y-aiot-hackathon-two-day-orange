@@ -8,6 +8,7 @@
 // the response returns (see runDiagnosis' finally block).
 
 import { defineHandler, readBody, createError } from 'nitro/h3'
+import { useLogger } from 'c8y-nitro/utils'
 import { runDiagnosis } from '../agent/loop'
 
 let counter = 0
@@ -29,6 +30,12 @@ export default defineHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'deviceId is required' })
   }
 
+  const log = useLogger(event)
+  log.info('diagnose request received', {
+    operation: 'diagnose',
+    deviceId: body.deviceId,
+  })
+
   const verdict = await runDiagnosis(event, {
     sessionId: newSessionId(body.deviceId),
     deviceId: body.deviceId,
@@ -37,5 +44,11 @@ export default defineHandler(async (event) => {
     pass2WindowMinutes: body.pass2WindowMinutes,
   })
 
+  log.info('diagnose complete', {
+    operation: 'diagnose',
+    deviceId: body.deviceId,
+    faulty: verdict.faulty,
+    faultDomain: verdict.faultDomain,
+  })
   return verdict
 })

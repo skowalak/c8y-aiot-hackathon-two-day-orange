@@ -20,3 +20,9 @@ simulator/devices.csv
 # editor / os
 .DS_Store
 *.log
+
+# build artifacts (docker images, extracted microservice packages)
+.c8y/
+docker/
+image.tar
+c8y-diagnostic-agent-*/
