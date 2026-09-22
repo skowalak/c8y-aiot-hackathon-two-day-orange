@@ -1,6 +1,6 @@
 {
   "name": "c8y-diagnostic-agent",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "AI Diagnostic Agent & Diagnostic MCP Server for Cumulocity IoT (Nitro microservice)",

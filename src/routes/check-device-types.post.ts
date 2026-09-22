@@ -3,13 +3,14 @@
 // POST /service/diagnostic-agent/check-device-types
 //   { "deviceTypes": ["sim_PowerNode"], "pass2WaitSeconds"?: 0 }
 //
-// Autonomously discovers all devices of each type, records + checks them against
-// the knowledge Markdown in the Cumulocity file repository, validates over two
-// passes, and returns the defective device(s) with the error.
+// Discovers all devices of each type, records their telemetry over two sampling
+// passes, and returns those summaries plus the expected-behaviour knowledge.
+// Returns evidence, not a verdict — the calling agent's model does the reasoning
+// (see src/agent/collect-device-types.ts for why).
 
 import { defineHandler, readBody, createError } from 'nitro/h3'
 import { useLogger } from 'c8y-nitro/utils'
-import { checkDeviceTypes } from '../agent/check-device-types'
+import { collectDeviceTypes } from '../agent/collect-device-types'
 
 interface Body {
   deviceTypes?: string[]
@@ -33,7 +34,7 @@ export default defineHandler(async (event) => {
     deviceTypes: body.deviceTypes,
   })
 
-  const result = await checkDeviceTypes(event, {
+  const result = await collectDeviceTypes(event, {
     deviceTypes: body.deviceTypes,
     pass1WindowMinutes: body.pass1WindowMinutes,
     pass2WaitSeconds: body.pass2WaitSeconds,
@@ -42,7 +43,8 @@ export default defineHandler(async (event) => {
 
   log.info('check-device-types complete', {
     operation: 'check_device_types',
-    defectCount: result.defects.length,
+    types: result.results.length,
+    devices: result.results.reduce((n, r) => n + r.devices.length, 0),
   })
   return result
 })

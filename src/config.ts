@@ -109,7 +109,10 @@ export async function anthropicConfigFromPlatform(): Promise<
       method: 'GET',
       headers: { Accept: 'application/json' },
     })
-    if (!res.ok) return undefined
+    if (!res.ok) {
+      lastPlatformError = `GET /application/currentApplication/settings -> ${res.status}`
+      return undefined
+    }
 
     const settings = (await res.json()) as Record<string, unknown>
     const read = (key: string): string | undefined => {
@@ -119,12 +122,27 @@ export async function anthropicConfigFromPlatform(): Promise<
 
     const apiKey = read('credentials.anthropicApiKey') ?? read('anthropicApiKey')
     // 'unset' is the manifest's mandatory placeholder default, not a real key.
-    if (!apiKey || apiKey === PLACEHOLDER_KEY) return undefined
+    if (!apiKey || apiKey === PLACEHOLDER_KEY) {
+      lastPlatformError = apiKey
+        ? 'settings returned the placeholder value ("unset") — the key was never set on the platform'
+        : `settings contained no anthropic key (keys seen: ${Object.keys(settings).join(', ') || 'none'})`
+      return undefined
+    }
     return { apiKey, model: read('anthropicModel') }
-  } catch {
-    // Outside Nitro (tests/local) or the platform call failed — caller falls back.
+  } catch (error) {
+    // Outside Nitro (tests/local) or the platform call failed — caller falls
+    // back, but record why so the failure is diagnosable instead of silent.
+    lastPlatformError = error instanceof Error ? error.message : String(error)
     return undefined
   }
+}
+
+/** Why the last platform lookup failed; surfaced in the thrown error. */
+let lastPlatformError: string | undefined
+
+/** Diagnostic detail from the most recent platform settings lookup. */
+export function lastPlatformSettingsError(): string | undefined {
+  return lastPlatformError
 }
 
 /**
@@ -139,7 +157,12 @@ export async function resolveAnthropicConfigAsync(
     return resolveAnthropicConfig(runtimeConfig)
   } catch (error) {
     const platform = await anthropicConfigFromPlatform()
-    if (!platform) throw error
+    if (!platform) {
+      const why = lastPlatformSettingsError()
+      throw why
+        ? new Error(`${(error as Error).message} [platform lookup: ${why}]`)
+        : error
+    }
     return {
       apiKey: platform.apiKey,
       model:

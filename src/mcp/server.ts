@@ -23,7 +23,7 @@ import { recordWindow } from './tools/record-window'
 import { queryLocal } from './tools/query-local'
 import { getExpectations } from './tools/get-expectations'
 import { clearSession } from './tools/clear-session'
-import { checkDeviceTypes } from '../agent/check-device-types'
+import { collectDeviceTypes } from '../agent/collect-device-types'
 import type { Reasoner } from '../agent/loop'
 import { getLogger } from '../log'
 
@@ -69,11 +69,12 @@ export function buildDiagnosticMcpServer(
   // returns the defective device(s) of each type with the error.
   server.tool(
     'check_device_types',
-    'Autonomously check one or more device TYPES for anomalies. Discovers all ' +
-      'devices of each type, records their telemetry, applies the expected-behaviour ' +
-      'checks from the knowledge Markdown in the Cumulocity file repository, ' +
-      'validates over two sampling passes, and returns the defective device(s) with ' +
-      'the fault domain and root cause.',
+    'Collect diagnostic evidence for one or more device TYPES. Discovers every ' +
+      'device of each type, records its telemetry over two sampling passes, and ' +
+      'returns those summaries together with the expected-behaviour knowledge ' +
+      'Markdown for the type. Returns EVIDENCE, not a verdict: compare each ' +
+      "device's data against the expectations yourself and name the faulty " +
+      'device, the fault domain and the root cause.',
     {
       deviceTypes: z
         .array(z.string())
@@ -88,18 +89,18 @@ export function buildDiagnosticMcpServer(
         tool: 'check_device_types',
         deviceTypes: args.deviceTypes,
       })
-      const result = await checkDeviceTypes(event, {
+      const result = await collectDeviceTypes(event, {
         deviceTypes: args.deviceTypes,
         pass1WindowMinutes: args.pass1WindowMinutes,
         pass2WaitSeconds: args.pass2WaitSeconds,
         pass2WindowMinutes: args.pass2WindowMinutes,
-        // For injected (test) servers, forward the fetchers + reasoner so no
-        // event / API key is needed.
-        ...(isInjected ? { fetch, text, reasoner } : {}),
+        // For injected (test) servers, forward the fetchers so no event is needed.
+        ...(isInjected ? { fetch, text } : {}),
       })
       log.info('check_device_types result', {
         tool: 'check_device_types',
-        defectCount: result.defects.length,
+        types: result.results.length,
+        devices: result.results.reduce((n, r) => n + r.devices.length, 0),
       })
       return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     },
